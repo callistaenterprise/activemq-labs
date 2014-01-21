@@ -4,3 +4,6 @@
 *.jar
 *.war
 *.ear
+SimpleAuthenticationPluginTest/target
+SimpleAuthenticationPluginTest/.project
+SimpleAuthenticationPluginTest/.classpath

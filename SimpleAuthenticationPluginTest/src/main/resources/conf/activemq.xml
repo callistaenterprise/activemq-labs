@@ -1,0 +1,220 @@
+<!--
+    Copyright 2014 Callista Enterprise AB
+ 
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+ 
+        http://www.apache.org/licenses/LICENSE-2.0
+ 
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+-->
+<beans
+  xmlns="http://www.springframework.org/schema/beans"
+  xmlns:amq="http://activemq.apache.org/schema/core"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans.xsd
+  http://activemq.apache.org/schema/core http://activemq.apache.org/schema/core/activemq-core.xsd">
+
+    <!-- Allows us to use system properties as variables in this configuration file -->
+    <bean class="org.springframework.beans.factory.config.PropertyPlaceholderConfigurer">
+        <property name="locations">
+            <value>file:${activemq.conf}/credentials.properties</value>
+        </property>
+    </bean>
+
+    <!--
+        The <broker> element is used to configure the ActiveMQ broker.
+    -->
+    <broker xmlns="http://activemq.apache.org/schema/core" brokerName="localhost" dataDirectory="${activemq.data}">
+
+	<!-- 
+		ML: Added sample security setup
+		Setup according to http://activemq.apache.org/security.html 
+		Setting anonymousAccessAllowed=true provides client that connects without username and password a default username (anonymous) and group (anonymous).
+	 -->
+	<plugins>
+		<simpleAuthenticationPlugin anonymousAccessAllowed="true">
+			<users>
+				<!-- User "admin" is expected only to be used by admins -->
+				<authenticationUser username="${admin.usr}" password="${admin.pwd}" groups="users,admins" />
+				
+				<!-- User "brokerUsr" is expected to be used by other connected brokers in a network of brokers -->
+				<authenticationUser username="${broker.usr}" password="${broker.pwd}" groups="users" />
+
+				<!-- User "app1Usr" is expected to be used by "application 1" for protected access to its queues and topics -->
+				<authenticationUser username="${app1.usr}" password="${app1.pwd}" groups="users,app1Grp" />
+
+				<!-- User "app2Usr" is expected to be used by "application 2" for protected access to its queues and topics -->
+				<authenticationUser username="${app2.usr}" password="${app2.pwd}" groups="users,app2Grp" />
+			</users>
+		</simpleAuthenticationPlugin>
+
+		<authorizationPlugin>
+			<map>
+				<authorizationMap>
+					<authorizationEntries>
+						<!-- 
+							Setup admin-only access to all queues but:
+							1. Queues prefixed by "OPEN." that are open to all including anonymous access
+							2. Queues prefixed by "APP1." that are open to the "app1Grp" group
+							2. Queues prefixed by "APP2." that are open to the "app2Grp" group
+						  -->
+						<authorizationEntry queue=">" read="admins" write="admins" admin="admins" />
+						<authorizationEntry queue="OPEN.>" read="users,anonymous" write="users,anonymous" admin="users,anonymous" />
+						<authorizationEntry queue="APP1.>" read="app1Grp" write="app1Grp" admin="app1Grp" />
+						<authorizationEntry queue="APP2.>" read="app2Grp" write="app2Grp" admin="app2Grp" />
+
+						<!-- 
+							Setup admin-only access to all topics but:
+							1. Topics prefixed by "OPEN." that are open to all including anonymous access
+							2. Topics prefixed by "APP1." that are open to the "app1Grp" group
+							2. Topics prefixed by "APP2." that are open to the "app2Grp" group
+						  -->
+						<authorizationEntry topic=">" read="admins" write="admins" admin="admins" />
+						<authorizationEntry topic="OPEN.>" read="users,anonymous" write="users,anonymous" admin="users,anonymous" />
+						<authorizationEntry topic="APP1.>" read="app1Grp" write="app1Grp" admin="app1Grp" />
+						<authorizationEntry topic="APP2.>" read="app2Grp" write="app2Grp" admin="app2Grp" />
+
+						<!-- Because advisory destinations are used by networks of brokers and a few other broker services, it is advised that full access permissions be granted for all of the advisory destinations -->
+						<authorizationEntry topic="ActiveMQ.Advisory.>" read="users,anonymous" write="users,anonymous" admin="users,anonymous" />
+					</authorizationEntries>
+				</authorizationMap>
+			</map>
+		</authorizationPlugin>
+
+	</plugins>
+
+        <!--
+            For better performances use VM cursor and small memory limit.
+            For more information, see:
+
+            http://activemq.apache.org/message-cursors.html
+
+            Also, if your producer is "hanging", it's probably due to producer flow control.
+            For more information, see:
+            http://activemq.apache.org/producer-flow-control.html
+        -->
+
+        <destinationPolicy>
+            <policyMap>
+              <policyEntries>
+                <policyEntry topic=">" producerFlowControl="true">
+                    <!-- The constantPendingMessageLimitStrategy is used to prevent
+                         slow topic consumers to block producers and affect other consumers
+                         by limiting the number of messages that are retained
+                         For more information, see:
+
+                         http://activemq.apache.org/slow-consumer-handling.html
+
+                    -->
+                  <pendingMessageLimitStrategy>
+                    <constantPendingMessageLimitStrategy limit="1000"/>
+                  </pendingMessageLimitStrategy>
+                </policyEntry>
+                <policyEntry queue=">" producerFlowControl="true" memoryLimit="1mb">
+                  <!-- Use VM cursor for better latency
+                       For more information, see:
+
+                       http://activemq.apache.org/message-cursors.html
+
+                  <pendingQueuePolicy>
+                    <vmQueueCursor/>
+                  </pendingQueuePolicy>
+                  -->
+                </policyEntry>
+              </policyEntries>
+            </policyMap>
+        </destinationPolicy>
+
+
+        <!--
+            The managementContext is used to configure how ActiveMQ is exposed in
+            JMX. By default, ActiveMQ uses the MBean server that is started by
+            the JVM. For more information, see:
+
+            http://activemq.apache.org/jmx.html
+        -->
+        <managementContext>
+            <managementContext createConnector="false"/>
+        </managementContext>
+
+        <!--
+            Configure message persistence for the broker. The default persistence
+            mechanism is the KahaDB store (identified by the kahaDB tag).
+            For more information, see:
+
+            http://activemq.apache.org/persistence.html
+        -->
+        <persistenceAdapter>
+            <kahaDB directory="${activemq.data}/kahadb"/>
+        </persistenceAdapter>
+
+
+          <!--
+            The systemUsage controls the maximum amount of space the broker will
+            use before slowing down producers. For more information, see:
+            http://activemq.apache.org/producer-flow-control.html
+            If using ActiveMQ embedded - the following limits could safely be used:
+
+        <systemUsage>
+            <systemUsage>
+                <memoryUsage>
+                    <memoryUsage limit="20 mb"/>
+                </memoryUsage>
+                <storeUsage>
+                    <storeUsage limit="1 gb"/>
+                </storeUsage>
+                <tempUsage>
+                    <tempUsage limit="100 mb"/>
+                </tempUsage>
+            </systemUsage>
+        </systemUsage>
+        -->
+          <systemUsage>
+            <systemUsage>
+                <memoryUsage>
+                    <memoryUsage limit="64 mb"/>
+                </memoryUsage>
+                <storeUsage>
+                    <storeUsage limit="100 gb"/>
+                </storeUsage>
+                <tempUsage>
+                    <tempUsage limit="50 gb"/>
+                </tempUsage>
+            </systemUsage>
+        </systemUsage>
+
+        <!--
+            The transport connectors expose ActiveMQ over a given protocol to
+            clients and other brokers. For more information, see:
+
+            http://activemq.apache.org/configuring-transports.html
+        -->
+        <transportConnectors>
+            <!-- DOS protection, limit concurrent connections to 1000 and frame size to 100MB -->
+            <transportConnector name="openwire" uri="tcp://0.0.0.0:61616?maximumConnections=1000&amp;wireformat.maxFrameSize=104857600"/>
+            <transportConnector name="amqp" uri="amqp://0.0.0.0:5672?maximumConnections=1000&amp;wireformat.maxFrameSize=104857600"/>
+        </transportConnectors>
+
+        <!-- destroy the spring context on shutdown to stop jetty -->
+        <shutdownHooks>
+            <bean xmlns="http://www.springframework.org/schema/beans" class="org.apache.activemq.hooks.SpringContextHook" />
+        </shutdownHooks>
+
+    </broker>
+
+    <!--
+        Enable web consoles, REST and Ajax APIs and demos
+
+        Take a look at ${ACTIVEMQ_HOME}/conf/jetty.xml for more details
+    -->
+<!-- ML: Let's skip the web parts, not needed for integration tests
+    <import resource="jetty.xml"/>
+ -->
+
+</beans>
